@@ -6,12 +6,13 @@ import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 
-import java.io.*;
-import java.util.NoSuchElementException;
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.util.*;
 
 public final class PDCBridge {
 
-    public static <T extends Serializable> PersistentDataType<PersistentDataContainer, T> defineType(Plugin plugin, Class<T> clazz) {
+    public static <T> PersistentDataType<PersistentDataContainer, T> defineType(Plugin plugin, Class<T> clazz) {
         return new PersistentDataType<>() {
             @Override
             public Class<PersistentDataContainer> getPrimitiveType() {
@@ -26,38 +27,72 @@ public final class PDCBridge {
             @Override
             public PersistentDataContainer toPrimitive(T complex, PersistentDataAdapterContext context) {
                 PersistentDataContainer data = context.newPersistentDataContainer();
-                NamespacedKey key = new NamespacedKey(plugin, getComplexType().getSimpleName());
-                try {
-                    ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-                    ObjectOutputStream os = new ObjectOutputStream(bytes);
-                    os.writeObject(complex);
-                    os.flush();
-                    byte[] serialized = bytes.toByteArray();
-                    data.set(key, PersistentDataType.BYTE_ARRAY, serialized);
-                } catch(IOException ex) {
-                    plugin.getLogger().warning("[defineType::toPrimitive] Failed to serialize record to data container. Nothing has been set.");
-                    ex.printStackTrace();
+                Set<String> encountered = new HashSet<>();
+                for (Field field : complex.getClass().getDeclaredFields()) {
+                    if(!encountered.add(field.getName().toLowerCase())) {
+                        plugin.getLogger().warning("[defineType::toPrimitive] Cannot store types with same-name fields (case insensitive!)! Aborting.");
+                        return context.newPersistentDataContainer();
+                    }
+
+                    field.setAccessible(true);
+                    var key = new NamespacedKey(plugin, field.getName());
+                    try {
+                        var type = field.getType();
+                        var setter = setters.get(type);
+                        if (setter == null) {
+                            plugin.getLogger().warning("[defineType::toPrimitive] Encountered an invalid field type: field \"" + field.getName() + "\" is " + type.getCanonicalName() + ".");
+                            plugin.getLogger().warning("[defineType::toPrimitive] Cannot store complex types recursively. Aborting.");
+                            return null;
+                        }
+
+                        setter.set(data, key, field.get(complex));
+                    } catch (IllegalAccessException e) {
+                        e.printStackTrace();
+                    }
                 }
                 return data;
             }
 
-            @SuppressWarnings("unchecked")
             @Override
             public T fromPrimitive(PersistentDataContainer primitive, PersistentDataAdapterContext context) {
-                NamespacedKey key = new NamespacedKey(plugin, getComplexType().getSimpleName());
-                byte[] data = primitive.get(key, PersistentDataType.BYTE_ARRAY);
-                if(data == null) throw new NoSuchElementException("Provided container does not contain a serialized " + getComplexType().getCanonicalName() + "!");
                 try {
-                    ByteArrayInputStream bytes = new ByteArrayInputStream(data);
-                    ObjectInputStream reader = new ObjectInputStream(bytes);
-                    return (T) reader.readObject();
-                } catch (IOException | ClassNotFoundException e) {
-                    plugin.getLogger().warning("[defineType::fromPrimitive] Failed to deserialize record from data container. Must return null.");
+                    return getComplexType().getDeclaredConstructor().newInstance();
+                } catch (InstantiationException | IllegalAccessException | InvocationTargetException | NoSuchMethodException e) {
                     e.printStackTrace();
                 }
-
-                throw new NoSuchElementException("Provided container does not contain a serialized " + getComplexType().getCanonicalName() + "!");
+                return null;
             }
         };
+    }
+
+    private static final Map<Class<?>, Setter> setters = new HashMap<>();
+
+    static {
+        //Primitives
+        setters.put(byte.class, (data, key, obj) -> data.set(key, PersistentDataType.BYTE, (byte) obj));
+        setters.put(short.class, (data, key, obj) -> data.set(key, PersistentDataType.SHORT, (short) obj));
+        setters.put(int.class, (data, key, obj) -> data.set(key, PersistentDataType.INTEGER, (int) obj));
+        setters.put(long.class, (data, key, obj) -> data.set(key, PersistentDataType.LONG, (long) obj));
+        setters.put(byte[].class, (data, key, obj) -> data.set(key, PersistentDataType.BYTE_ARRAY, (byte[]) obj));
+        setters.put(int[].class, (data, key, obj) -> data.set(key, PersistentDataType.INTEGER_ARRAY, (int[]) obj));
+        setters.put(long[].class, (data, key, obj) -> data.set(key, PersistentDataType.LONG_ARRAY, (long[]) obj));
+        setters.put(float.class, (data, key, obj) -> data.set(key, PersistentDataType.FLOAT, (float) obj));
+        setters.put(double.class, (data, key, obj) -> data.set(key, PersistentDataType.DOUBLE, (double) obj));
+
+        //Boxed
+        setters.put(Byte.class, setters.get(byte.class));
+        setters.put(Short.class, setters.get(short.class));
+        setters.put(Integer.class, setters.get(int.class));
+        setters.put(Long.class, setters.get(long.class));
+        setters.put(Float.class, setters.get(float.class));
+        setters.put(Double.class, setters.get(double.class));
+
+        //Complex
+        setters.put(String.class, (data, key, obj) -> data.set(key, PersistentDataType.STRING, (String) obj));
+        setters.put(UUID.class, (data, key, obj) -> data.set(key, Type.UUID, (UUID) obj));
+    }
+
+    private interface Setter {
+        void set(PersistentDataContainer data, NamespacedKey key, Object obj);
     }
 }

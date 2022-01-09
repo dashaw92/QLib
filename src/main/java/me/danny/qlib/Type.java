@@ -12,7 +12,7 @@ public final class Type {
     public static final PersistentDataType<PersistentDataContainer, UUID> UUID = new UUIDType();
 
     private static final class UUIDType implements PersistentDataType<PersistentDataContainer, UUID> {
-        private static final NamespacedKey key = new NamespacedKey("qlib", "uuid");
+        private static final NamespacedKey key = NamespacedKey.fromString("qlib:uuid");
 
         @Override
         public Class<PersistentDataContainer> getPrimitiveType() {

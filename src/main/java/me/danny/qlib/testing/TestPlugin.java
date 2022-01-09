@@ -11,12 +11,12 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.util.Arrays;
 import java.util.UUID;
 
 public final class TestPlugin extends JavaPlugin {
 
     private final PersistentDataType<?, SimpleRecord> SIMPLE_RECORD = PDCBridge.defineType(this, SimpleRecord.class);
-    private final PersistentDataType<?, TestSameName> TEST_SAME_NAME = PDCBridge.defineType(this, TestSameName.class);
 
     @Override
     public void onEnable() {
@@ -34,18 +34,28 @@ public final class TestPlugin extends JavaPlugin {
         @Override
         public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
             if(!(sender instanceof Player p)) return true;
+            var key2 = new NamespacedKey(inst, "simple_record");
+
+            if(p.getInventory().getItemInMainHand().getType() == Material.STICK) {
+                var it = p.getInventory().getItemInMainHand();
+                var meta = it.getItemMeta();
+                var simpleRecordOut = meta.getPersistentDataContainer().get(key2, inst.SIMPLE_RECORD);
+                p.sendMessage("Got : " + simpleRecordOut);
+                return true;
+            }
 
             var it = new ItemStack(Material.STICK);
             var meta = it.getItemMeta();
             meta.setDisplayName("Contains data");
 
-//            var simple = new SimpleRecord(Math.random() * 100 + " . random", (int) (Math.random() * 10), new byte[] {1, 2, 3}, p.getUniqueId());
-//            var key = new NamespacedKey(inst, "simple_record");
-//            meta.getPersistentDataContainer().set(key, inst.SIMPLE_RECORD, simple);
+            var simpleRecord = new SimpleRecord(
+                    "danny was here",
+                    22,
+                    new byte[] { 1, 2, 3 },
+                    p.getUniqueId()
+            );
 
-            var sameName = new TestSameName("string field", 20);
-            var key2 = new NamespacedKey(inst, "same_name");
-            meta.getPersistentDataContainer().set(key2, inst.TEST_SAME_NAME, sameName);
+            meta.getPersistentDataContainer().set(key2, inst.SIMPLE_RECORD, simpleRecord);
 
             it.setItemMeta(meta);
             p.getInventory().addItem(it);
@@ -53,6 +63,27 @@ public final class TestPlugin extends JavaPlugin {
         }
     }
 
-    public record SimpleRecord(String stringField, int someInt, byte[] extraData, UUID test) {}
-    public record TestSameName(String field, int Field) {}
+    public static final class SimpleRecord {
+        private final String stringField;
+        private final int someInt;
+        private final byte[] extraData;
+        private final UUID test;
+
+        public SimpleRecord(String stringField, int someInt, byte[] extraData, UUID test) {
+            this.stringField = stringField;
+            this.someInt = someInt;
+            this.extraData = extraData;
+            this.test = test;
+        }
+
+        @Override
+        public String toString() {
+            return "SimpleRecord{" +
+                    "stringField='" + stringField + '\'' +
+                    ", someInt=" + someInt +
+                    ", extraData=" + Arrays.toString(extraData) +
+                    ", test=" + test +
+                    '}';
+        }
+    }
 }
